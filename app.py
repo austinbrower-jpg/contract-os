@@ -78,36 +78,39 @@ def init_sheet(sheet):
 # --- Authentication ---
 def check_password():
     """Returns `True` if the user had a correct password."""
+
     def password_entered():
         """Checks whether a password entered by the user is correct."""
-        if (
-            st.session_state["username"] == "admin"
-            and st.session_state["password"] == "battlebound2025"
-        ):
+        # Use .get() to avoid KeyError if keys are missing
+        user = st.session_state.get("username", "")
+        pw = st.session_state.get("password", "")
+        
+        if user == "admin" and pw == "battlebound2025":
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Don't store password
-            del st.session_state["username"]
+            # Clear inputs
+            st.session_state["username"] = "" 
+            st.session_state["password"] = ""
         else:
             st.session_state["password_correct"] = False
 
+    # Initialize state if not present
     if "password_correct" not in st.session_state:
-        # First run, show inputs
+        st.session_state["password_correct"] = False
+
+    if not st.session_state["password_correct"]:
+        # Show Login Form
         st.text_input("Username", key="username")
-        st.text_input("Password", type="password", on_change=password_entered, key="password")
+        st.text_input("Password", type="password", key="password")
         st.button("Login", on_click=password_entered)
+        
+        # Show error only if they tried to log in and failed
+        if st.session_state.get("password_correct") is False:
+             # Only show error if they actually typed something (avoid error on first load)
+            if st.session_state.get("username") or st.session_state.get("password"):
+                st.error("😕 User not known or password incorrect")
         return False
     
-    elif not st.session_state["password_correct"]:
-        # Password incorrect, show inputs + error
-        st.text_input("Username", key="username")
-        st.text_input("Password", type="password", on_change=password_entered, key="password")
-        st.button("Login", on_click=password_entered)
-        st.error("😕 User not known or password incorrect")
-        return False
-    
-    else:
-        # Password correct
-        return True
+    return True
 
 # --- Main App Logic ---
 if check_password():
