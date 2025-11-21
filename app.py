@@ -5,6 +5,7 @@ import os
 import json
 import pandas as pd
 from datetime import date, datetime, timedelta
+import time
 
 # --- Page Configuration ---
 st.set_page_config(page_title="Battle Bound Branding", page_icon="🔒", layout="wide")
@@ -14,6 +15,8 @@ if "username" not in st.session_state:
     st.session_state["username"] = ""
 if "password" not in st.session_state:
     st.session_state["password"] = ""
+if "data_backup" not in st.session_state:
+    st.session_state["data_backup"] = {}
 
 # --- Constants ---
 SHEET_ID = '1QsIKLchwTzC0tAhdgT3JE6TFYRqWS-g5ZNyV5HYglCY'
@@ -78,31 +81,48 @@ def init_sheet(sheet):
                 worksheet.append_row(headers)
             else:
                 # Check for missing columns and append them if necessary
-                # This is a simple check to ensure new columns like 'Contract' or 'Pay Rate' are added
                 for i, header in enumerate(headers):
                     if header not in existing_headers:
                         worksheet.update_cell(1, len(existing_headers) + 1, header)
-                        existing_headers.append(header) # Update local list to keep track
+                        existing_headers.append(header) 
                 
         except gspread.WorksheetNotFound:
             worksheet = sheet.add_worksheet(title=name, rows=100, cols=20)
             worksheet.append_row(headers)
 
-@st.cache_data(ttl=300) # Cache data for 5 minutes
+@st.cache_data(ttl=60) # Aggressive Caching: 60 seconds
 def load_data(_sheet, worksheet_name):
-    """Fetches data from a worksheet and returns it as a DataFrame."""
+    """Fetches data from a worksheet and returns it as a DataFrame. Handles 429 Errors."""
     if not _sheet:
         return pd.DataFrame()
+    
     try:
         ws = _sheet.worksheet(worksheet_name)
         data = ws.get_all_records()
-        return pd.DataFrame(data)
+        df = pd.DataFrame(data)
+        
+        # Success! Update the backup in session state
+        st.session_state["data_backup"][worksheet_name] = df
+        return df
+        
     except Exception as e:
-        st.error(f"Error loading {worksheet_name}: {e}")
-        return pd.DataFrame()
+        error_str = str(e)
+        # Check for Quota Exceeded / 429
+        if "429" in error_str or "Quota exceeded" in error_str:
+            st.warning(f"🚦 Speed Limit Hit (429). Displaying cached data for {worksheet_name}. Please wait 60s.")
+            # Attempt to return backup
+            if worksheet_name in st.session_state["data_backup"]:
+                return st.session_state["data_backup"][worksheet_name]
+            else:
+                st.error("Quota exceeded and no cached data available.")
+                return pd.DataFrame()
+        else:
+            st.error(f"Error loading {worksheet_name}: {e}")
+            return pd.DataFrame()
 
 def clear_cache():
     st.cache_data.clear()
+    st.toast("Cache Cleared! Fetching fresh data...", icon="🔄")
 
 # --- Authentication ---
 def check_password():
@@ -110,31 +130,25 @@ def check_password():
 
     def password_entered():
         """Checks whether a password entered by the user is correct."""
-        # Use .get() to avoid KeyError if keys are missing
         user = st.session_state.get("username", "")
         pw = st.session_state.get("password", "")
         
         if user == "admin" and pw == "battlebound2025":
             st.session_state["password_correct"] = True
-            # Clear inputs
             st.session_state["username"] = "" 
             st.session_state["password"] = ""
         else:
             st.session_state["password_correct"] = False
 
-    # Initialize state if not present
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = False
 
     if not st.session_state["password_correct"]:
-        # Show Login Form
         st.text_input("Username", key="username")
         st.text_input("Password", type="password", key="password")
         st.button("Login", on_click=password_entered)
         
-        # Show error only if they tried to log in and failed
         if st.session_state.get("password_correct") is False:
-             # Only show error if they actually typed something (avoid error on first load)
             if st.session_state.get("username") or st.session_state.get("password"):
                 st.error("😕 User not known or password incorrect")
         return False
@@ -145,15 +159,19 @@ def check_password():
 if check_password():
     # Initialize Sheet
     sheet = get_db_connection()
+    # Only init_sheet on first load to save quota, or handle errors gracefully
     if sheet:
-        init_sheet(sheet)
+        try:
+            init_sheet(sheet)
+        except Exception as e:
+            if "429" in str(e):
+                st.warning("Could not verify sheet structure due to quota limits. Proceeding with cached data.")
 
     # --- Sidebar ---
-    # Logo
     if os.path.exists("BBLogo.png"):
         st.sidebar.image("BBLogo.png", use_container_width=True)
     else:
-        st.sidebar.title("Battle Bound Branding") # Fallback if image missing
+        st.sidebar.title("Battle Bound Branding")
         
     st.sidebar.markdown("---")
     page = st.sidebar.radio("Navigate", ["Home", "Pipeline", "Active Contracts", "Invoices", "Directory", "Hours", "Expenses", "Mileage"])
@@ -173,17 +191,18 @@ if check_password():
         st.subheader("Company Operation Center")
         st.divider()
         
-        # Load Data for Metrics
+        # Load Data for Metrics (Cached)
         df_dir = load_data(sheet, "Directory")
         df_exp = load_data(sheet, "Expenses")
         df_mil = load_data(sheet, "Mileage")
+        df_active_contracts = load_data(sheet, "Active_Contracts")
         
         # Calculate Metrics
         active_members = len(df_dir) if not df_dir.empty else 0
+        active_contracts_count = len(df_active_contracts[df_active_contracts['Status'] == 'Active']) if not df_active_contracts.empty and 'Status' in df_active_contracts.columns else 0
         
         pending_expenses = 0.0
         if not df_exp.empty and 'Amount' in df_exp.columns:
-            # Clean currency strings if necessary
             if df_exp['Amount'].dtype == object:
                  df_exp['Amount'] = df_exp['Amount'].replace('[\$,]', '', regex=True).astype(float)
             pending_expenses = df_exp['Amount'].sum()
@@ -194,13 +213,13 @@ if check_password():
 
         # Display Metrics
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Active Contracts", "3") # Placeholder as requested
+        col1.metric("Active Contracts", str(active_contracts_count))
         col2.metric("Team Members", str(active_members))
         col3.metric("Pending Expenses", f"${pending_expenses:,.2f}")
         col4.metric("YTD Mileage", f"{ytd_mileage:,.1f} mi")
         
         st.markdown("### Recent Activity")
-        st.info("System initialized. Dashboard data is live.")
+        st.info("System initialized. Dashboard data is cached for performance.")
 
     # --- Pipeline Page ---
     elif page == "Pipeline":
@@ -219,7 +238,6 @@ if check_password():
                 col3, col4 = st.columns(2)
                 contract_type = col3.selectbox("Contract Type", ["Federal", "State", "Commercial", "Sub-Contract", "Other"])
                 contact_name = col4.text_input("Point of Contact Name")
-                
                 contact_email = st.text_input("Point of Contact Email")
                 
                 col5, col6, col7 = st.columns(3)
@@ -232,13 +250,16 @@ if check_password():
                 submitted = st.form_submit_button("Add to Pipeline")
                 if submitted and name:
                     if sheet:
-                        ws = sheet.worksheet('Pipeline_Contracts')
-                        ws.append_row([
-                            name, notice_id, contract_type, contact_name, contact_email, 
-                            str(offers_due), str(inactive_date), str(publish_date), notes
-                        ])
-                        st.success("Contract Opportunity Added!")
-                        clear_cache()
+                        try:
+                            ws = sheet.worksheet('Pipeline_Contracts')
+                            ws.append_row([
+                                name, notice_id, contract_type, contact_name, contact_email, 
+                                str(offers_due), str(inactive_date), str(publish_date), notes
+                            ])
+                            st.success("Contract Opportunity Added!")
+                            clear_cache()
+                        except Exception as e:
+                            st.error(f"Error saving: {e}")
                     else:
                          st.warning("Saved locally (No DB connection)")
             
@@ -268,13 +289,16 @@ if check_password():
                 submitted = st.form_submit_button("Add Company Lead")
                 if submitted and company_name:
                     if sheet:
-                        ws = sheet.worksheet('Pipeline_Companies')
-                        ws.append_row([
-                            company_name, contact_name, contact_email, contact_phone, 
-                            contacted, fb_url
-                        ])
-                        st.success("Company Lead Added!")
-                        clear_cache()
+                        try:
+                            ws = sheet.worksheet('Pipeline_Companies')
+                            ws.append_row([
+                                company_name, contact_name, contact_email, contact_phone, 
+                                contacted, fb_url
+                            ])
+                            st.success("Company Lead Added!")
+                            clear_cache()
+                        except Exception as e:
+                            st.error(f"Error saving: {e}")
                     else:
                         st.warning("Saved locally (No DB connection)")
 
@@ -298,7 +322,6 @@ if check_password():
         
         if not df_active.empty:
             if 'Total Ceiling Value' in df_active.columns:
-                 # Clean currency
                  if df_active['Total Ceiling Value'].dtype == object:
                      vals = df_active['Total Ceiling Value'].replace('[\$,]', '', regex=True)
                      total_value = pd.to_numeric(vals, errors='coerce').sum()
@@ -308,7 +331,6 @@ if check_password():
             if 'End Date' in df_active.columns:
                 df_active['End Date'] = pd.to_datetime(df_active['End Date'], errors='coerce')
                 today = pd.to_datetime(date.today())
-                # Filter for future dates
                 future_dates = df_active[df_active['End Date'] > today]['End Date']
                 if not future_dates.empty:
                     min_days = (future_dates.min() - today).days
@@ -341,20 +363,22 @@ if check_password():
             submitted = st.form_submit_button("Activate Contract")
             if submitted and contract_name:
                 if sheet:
-                    ws = sheet.worksheet('Active_Contracts')
-                    ws.append_row([
-                        contract_name, agency, contract_number, 
-                        str(start_date), str(end_date), ceiling_value, status, notes
-                    ])
-                    st.success("Contract Activated!")
-                    clear_cache()
+                    try:
+                        ws = sheet.worksheet('Active_Contracts')
+                        ws.append_row([
+                            contract_name, agency, contract_number, 
+                            str(start_date), str(end_date), ceiling_value, status, notes
+                        ])
+                        st.success("Contract Activated!")
+                        clear_cache()
+                    except Exception as e:
+                        st.error(f"Error saving: {e}")
                 else:
                     st.warning("Saved locally (No DB connection)")
         
         # Show Data
         st.subheader("📋 Active Contracts List")
         if not df_active.empty:
-            # Format dates for display
             if 'End Date' in df_active.columns:
                  df_active['End Date'] = df_active['End Date'].dt.date
             st.dataframe(df_active, use_container_width=True)
@@ -375,16 +399,13 @@ if check_password():
         overdue_count = 0
         
         if not df_invoices.empty:
-            # Ensure numeric amount
             if 'Amount' in df_invoices.columns:
                 if df_invoices['Amount'].dtype == object:
                     df_invoices['Amount'] = df_invoices['Amount'].replace('[\$,]', '', regex=True).astype(float)
             
-            # Ensure dates
             if 'Due Date' in df_invoices.columns:
                 df_invoices['Due Date'] = pd.to_datetime(df_invoices['Due Date'], errors='coerce')
             
-            # Calculate Metrics
             outstanding_revenue = df_invoices[df_invoices['Status'] == 'Sent']['Amount'].sum()
             collected_ytd = df_invoices[df_invoices['Status'] == 'Paid']['Amount'].sum()
             
@@ -392,10 +413,8 @@ if check_password():
             overdue_mask = (df_invoices['Status'] != 'Paid') & (df_invoices['Status'] != 'Cancelled') & (df_invoices['Due Date'] < today)
             overdue_count = overdue_mask.sum()
             
-            # Mark overdue in dataframe for display
             df_invoices.loc[overdue_mask, 'Status'] = '⚠️ OVERDUE'
 
-        # Display Metrics
         col1, col2, col3 = st.columns(3)
         col1.metric("Outstanding Revenue", f"${outstanding_revenue:,.2f}")
         col2.metric("Collected YTD", f"${collected_ytd:,.2f}")
@@ -409,7 +428,7 @@ if check_password():
             col1, col2 = st.columns(2)
             invoice_number = col1.text_input("Invoice Number")
             
-            # Dropdown for Contract
+            # Dropdown for Contract (Cached)
             if not df_active.empty and 'Contract Name' in df_active.columns:
                 contract = col2.selectbox("Contract", df_active['Contract Name'].sort_values().unique())
             else:
@@ -428,29 +447,28 @@ if check_password():
             submitted = st.form_submit_button("Save Invoice")
             if submitted and invoice_number:
                 if sheet:
-                    ws = sheet.worksheet('Invoices')
-                    ws.append_row([
-                        invoice_number, contract, str(date_sent), str(due_date), 
-                        amount, status, notes
-                    ])
-                    st.success("Invoice Saved!")
-                    clear_cache()
+                    try:
+                        ws = sheet.worksheet('Invoices')
+                        ws.append_row([
+                            invoice_number, contract, str(date_sent), str(due_date), 
+                            amount, status, notes
+                        ])
+                        st.success("Invoice Saved!")
+                        clear_cache()
+                    except Exception as e:
+                        st.error(f"Error saving: {e}")
                 else:
                     st.warning("Saved locally (No DB connection)")
         
         # Show Data
         st.subheader("🗂 Invoice Log")
         if not df_invoices.empty:
-            # Format dates for display
             if 'Due Date' in df_invoices.columns:
                  df_invoices['Due Date'] = df_invoices['Due Date'].dt.date
             if 'Date Sent' in df_invoices.columns:
-                 # Ensure Date Sent is also formatted if present
                  df_invoices['Date Sent'] = pd.to_datetime(df_invoices['Date Sent'], errors='coerce').dt.date
                  
-            # Sort by Due Date descending
             df_invoices = df_invoices.sort_values('Due Date', ascending=False)
-            
             st.dataframe(df_invoices, use_container_width=True)
         else:
             st.info("No invoices found.")
@@ -471,10 +489,13 @@ if check_password():
             submitted = st.form_submit_button("Save Contact")
             if submitted and name:
                 if sheet:
-                    ws = sheet.worksheet('Directory')
-                    ws.append_row([name, company, email, phone, address, pay_rate])
-                    st.success("Contact Saved!")
-                    clear_cache() # Clear cache to show new data immediately
+                    try:
+                        ws = sheet.worksheet('Directory')
+                        ws.append_row([name, company, email, phone, address, pay_rate])
+                        st.success("Contact Saved!")
+                        clear_cache()
+                    except Exception as e:
+                        st.error(f"Error saving: {e}")
                 else:
                     st.warning("Saved locally (No DB connection)")
 
@@ -499,23 +520,18 @@ if check_password():
         df_active = load_data(sheet, "Active_Contracts")
         
         if not df_hours.empty and not df_dir.empty:
-            # Ensure numeric types
             df_hours['Hours'] = pd.to_numeric(df_hours['Hours'], errors='coerce').fillna(0)
             
-            # Group by Employee
             payroll = df_hours.groupby('Employee')['Hours'].sum().reset_index()
             payroll.columns = ['Employee', 'Total Hours']
             
-            # Merge with Directory for Pay Rate
             if 'Name' in df_dir.columns and 'Pay Rate' in df_dir.columns:
-                # Clean Pay Rate
                 df_dir['Pay Rate'] = pd.to_numeric(df_dir['Pay Rate'], errors='coerce').fillna(0)
                 
                 merged = pd.merge(payroll, df_dir[['Name', 'Pay Rate']], left_on='Employee', right_on='Name', how='left')
                 merged['Pay Rate'] = merged['Pay Rate'].fillna(0)
                 merged['Est. Total Pay'] = merged['Total Hours'] * merged['Pay Rate']
                 
-                # Formatting for display
                 display_df = merged[['Employee', 'Total Hours', 'Pay Rate', 'Est. Total Pay']].copy()
                 display_df['Est. Total Pay'] = display_df['Est. Total Pay'].apply(lambda x: f"${x:,.2f}")
                 display_df['Pay Rate'] = display_df['Pay Rate'].apply(lambda x: f"${x:,.2f}")
@@ -534,13 +550,13 @@ if check_password():
         with st.form("hours_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             
-            # Dropdown for employee
+            # Dropdown for employee (Cached)
             if not df_dir.empty and 'Name' in df_dir.columns:
                 employee = col1.selectbox("Employee Name", df_dir['Name'].sort_values().unique())
             else:
                 employee = col1.text_input("Employee Name")
             
-            # Dropdown for Contract
+            # Dropdown for Contract (Cached)
             if not df_active.empty and 'Contract Name' in df_active.columns:
                 contract = col2.selectbox("Contract / Project", df_active['Contract Name'].sort_values().unique())
             else:
@@ -554,19 +570,20 @@ if check_password():
             submitted = st.form_submit_button("Log Hours")
             if submitted and employee:
                 if sheet:
-                    ws = sheet.worksheet('Hours')
-                    ws.append_row([employee, str(work_date), hours, task, contract])
-                    st.success("Hours Logged!")
-                    clear_cache()
+                    try:
+                        ws = sheet.worksheet('Hours')
+                        ws.append_row([employee, str(work_date), hours, task, contract])
+                        st.success("Hours Logged!")
+                        clear_cache()
+                    except Exception as e:
+                        st.error(f"Error saving: {e}")
         
         # 3. Raw Log
         if not df_hours.empty:
             st.markdown("### Detailed Log")
-            # Sort by Date if possible
             if 'Date' in df_hours.columns:
                 df_hours['Date'] = pd.to_datetime(df_hours['Date'], errors='coerce')
                 df_hours = df_hours.sort_values('Date', ascending=False)
-                # Convert back to string for clean display or keep as date
                 df_hours['Date'] = df_hours['Date'].dt.date
             st.dataframe(df_hours, use_container_width=True)
 
@@ -580,7 +597,7 @@ if check_password():
             col1, col2 = st.columns(2)
             category = col1.selectbox("Category", ["Mileage", "Gas", "Lodging", "Food", "Materials", "Other"])
             
-            # Dropdown for Contract
+            # Dropdown for Contract (Cached)
             if not df_active.empty and 'Contract Name' in df_active.columns:
                 contract = col2.selectbox("Contract / Project", df_active['Contract Name'].sort_values().unique())
             else:
@@ -595,10 +612,13 @@ if check_password():
             submitted = st.form_submit_button("Log Expense")
             if submitted and amount:
                 if sheet:
-                    ws = sheet.worksheet('Expenses')
-                    ws.append_row([category, amount, str(expense_date), description, contract])
-                    st.success("Expense Logged!")
-                    clear_cache()
+                    try:
+                        ws = sheet.worksheet('Expenses')
+                        ws.append_row([category, amount, str(expense_date), description, contract])
+                        st.success("Expense Logged!")
+                        clear_cache()
+                    except Exception as e:
+                        st.error(f"Error saving: {e}")
 
         # Show Data
         df = load_data(sheet, "Expenses")
@@ -636,11 +656,13 @@ if check_password():
                 st.info(f"Total Miles: {total_miles:.1f} | Reimbursement: {reimbursement_str}")
                 
                 if sheet:
-                    ws = sheet.worksheet('Mileage')
-                    ws.append_row([
-                        str(mileage_date), license_plate, vehicle, vehicle_type, 
-                        start_odo, end_odo, total_miles, reimbursement_str
-                    ])
-                    st.success("Mileage Logged!")
-                    clear_cache()
-
+                    try:
+                        ws = sheet.worksheet('Mileage')
+                        ws.append_row([
+                            str(mileage_date), license_plate, vehicle, vehicle_type, 
+                            start_odo, end_odo, total_miles, reimbursement_str
+                        ])
+                        st.success("Mileage Logged!")
+                        clear_cache()
+                    except Exception as e:
+                        st.error(f"Error saving: {e}")
