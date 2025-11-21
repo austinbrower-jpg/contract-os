@@ -7,7 +7,7 @@ import pandas as pd
 from datetime import date
 
 # --- Page Configuration ---
-st.set_page_config(page_title="ContractOS", page_icon="🔒", layout="wide")
+st.set_page_config(page_title="Battle Bound Branding", page_icon="🔒", layout="wide")
 
 # --- Session State Initialization ---
 if "username" not in st.session_state:
@@ -119,15 +119,39 @@ if check_password():
     if sheet:
         init_sheet(sheet)
 
-    st.sidebar.title("ContractOS 🚀")
-    page = st.sidebar.radio("Navigate", ["Directory", "Hours", "Expenses", "Mileage"])
+    # --- Sidebar ---
+    # Logo
+    if os.path.exists("BBLogo.png"):
+        st.sidebar.image("BBLogo.png", use_container_width=True)
+    else:
+        st.sidebar.title("Battle Bound Branding") # Fallback if image missing
+        
+    st.sidebar.markdown("---")
+    page = st.sidebar.radio("Navigate", ["Home", "Directory", "Hours", "Expenses", "Mileage"])
     
+    st.sidebar.markdown("---")
     if st.sidebar.button("Logout"):
         st.session_state["password_correct"] = False
         st.rerun()
 
+    # --- Home Page ---
+    if page == "Home":
+        st.title("Battle Bound Branding")
+        st.subheader("Company Operation Center")
+        st.divider()
+        
+        # Dashboard Metrics
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Active Contracts", "3")
+        col2.metric("Team Members", "8")
+        col3.metric("Pending Expenses", "$1,240")
+        col4.metric("YTD Mileage", "4,500 mi")
+        
+        st.markdown("### Recent Activity")
+        st.info("System initialized. Welcome to your new dashboard.")
+
     # --- Directory Page ---
-    if page == "Directory":
+    elif page == "Directory":
         st.title("👥 Directory")
         
         with st.form("directory_form", clear_on_submit=True):
