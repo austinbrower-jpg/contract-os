@@ -1,49 +1,42 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session
-import os
-import json
+import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
-from functools import wraps
+import os
+import json
+import pandas as pd
+from datetime import date
 
-app = Flask(__name__)
-app.secret_key = 'supersecretkey'  # Change this for production
+# --- Page Configuration ---
+st.set_page_config(page_title="ContractOS", page_icon="🔒", layout="wide")
 
-# Google Sheets Configuration
+# --- Constants ---
 SHEET_ID = '1QsIKLchwTzC0tAhdgT3JE6TFYRqWS-g5ZNyV5HYglCY'
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SERVICE_ACCOUNT_FILE = os.path.join(BASE_DIR, 'credentials.json')
 
-# --- Authentication Decorator ---
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'logged_in' not in session:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated_function
-
+# --- Helper Functions ---
 def get_db_connection():
-    """Establishes connection to Google Sheets (Cloud Compatible)."""
+    """Establishes connection to Google Sheets with Secrets or Local Fallback."""
     creds = None
     
-    # 1. Try Cloud Environment Variable (Secrets)
-    json_creds = os.environ.get('GOOGLE_CREDENTIALS')
-    if json_creds:
+    # 1. Try Streamlit Secrets
+    if 'gcp_service_account' in st.secrets:
         try:
-            creds_dict = json.loads(json_creds)
+            creds_dict = st.secrets['gcp_service_account']
             creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
         except Exception as e:
-            print(f"Error loading credentials from Env: {e}")
+            st.error(f"Error loading secrets: {e}")
 
     # 2. Fallback to Local File
     if not creds and os.path.exists(SERVICE_ACCOUNT_FILE):
         try:
             creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
         except Exception as e:
-            print(f"Error loading credentials from File: {e}")
+            st.error(f"Error loading local credentials: {e}")
 
     if not creds:
+        st.error("No credentials found! Please set up st.secrets or credentials.json.")
         return None
 
     try:
@@ -51,41 +44,14 @@ def get_db_connection():
         sheet = client.open_by_key(SHEET_ID)
         return sheet
     except Exception as e:
-        print(f"Error connecting to Google Sheets: {repr(e)}")
-        if hasattr(e, 'response'):
-             print(f"Response: {e.response.text}")
+        st.error(f"Error connecting to Google Sheets: {e}")
         return None
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        # Simple Hardcoded Auth (as requested)
-        if username == 'admin' and password == 'battlebound2025':
-            session['logged_in'] = True
-            flash('Welcome back, Commander.', 'success')
-            return redirect(url_for('index'))
-        else:
-            flash('Invalid credentials.', 'error')
-            
-    return render_template('login.html')
-
-@app.route('/logout')
-def logout():
-    session.pop('logged_in', None)
-    flash('Logged out successfully.', 'success')
-    return redirect(url_for('login'))
-
-
-def init_sheet():
+def init_sheet(sheet):
     """Ensures the necessary worksheets and headers exist."""
-    sheet = get_db_connection()
     if not sheet:
         return
 
-    # Define required worksheets and their headers
     tables = {
         'Directory': ['Name', 'Company', 'Email', 'Phone', 'Address'],
         'Hours': ['Employee', 'Date', 'Hours', 'Task'],
@@ -96,134 +62,158 @@ def init_sheet():
     for name, headers in tables.items():
         try:
             worksheet = sheet.worksheet(name)
+            # Check if empty and add headers if needed
+            if not worksheet.row_values(1):
+                worksheet.append_row(headers)
         except gspread.WorksheetNotFound:
             worksheet = sheet.add_worksheet(title=name, rows=100, cols=20)
             worksheet.append_row(headers)
-            print(f"Created worksheet: {name}")
-        
-        # Check if headers match (basic check)
-        existing_headers = worksheet.row_values(1)
-        if not existing_headers:
-            worksheet.append_row(headers)
 
-@app.route('/')
-@login_required
-def index():
-    return render_template('index.html')
+# --- Authentication ---
+def check_password():
+    """Returns `True` if the user had a correct password."""
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if (
+            st.session_state["username"] == "admin"
+            and st.session_state["password"] == "battlebound2025"
+        ):
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store password
+            del st.session_state["username"]
+        else:
+            st.session_state["password_correct"] = False
 
-@app.route('/directory', methods=['GET', 'POST'])
-@login_required
-def directory():
-    if request.method == 'POST':
-        name = request.form.get('name')
-        phone = request.form.get('phone')
-        email = request.form.get('email')
-        company = request.form.get('company')
-        address = request.form.get('address')
+    if "password_correct" not in st.session_state:
+        # First run, show inputs
+        st.text_input("Username", key="username")
+        st.text_input("Password", type="password", on_change=password_entered, key="password")
+        st.button("Login", on_click=password_entered)
+        return False
+    
+    elif not st.session_state["password_correct"]:
+        # Password incorrect, show inputs + error
+        st.text_input("Username", key="username")
+        st.text_input("Password", type="password", on_change=password_entered, key="password")
+        st.button("Login", on_click=password_entered)
+        st.error("😕 User not known or password incorrect")
+        return False
+    
+    else:
+        # Password correct
+        return True
+
+# --- Main App Logic ---
+if check_password():
+    # Initialize Sheet
+    sheet = get_db_connection()
+    if sheet:
+        init_sheet(sheet)
+
+    st.sidebar.title("ContractOS 🚀")
+    page = st.sidebar.radio("Navigate", ["Directory", "Hours", "Expenses", "Mileage"])
+    
+    if st.sidebar.button("Logout"):
+        st.session_state["password_correct"] = False
+        st.rerun()
+
+    # --- Directory Page ---
+    if page == "Directory":
+        st.title("👥 Directory")
         
-        sheet = get_db_connection()
+        with st.form("directory_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            name = col1.text_input("Full Name")
+            company = col2.text_input("Company")
+            email = col1.text_input("Email")
+            phone = col2.text_input("Phone")
+            address = st.text_area("Address")
+            
+            submitted = st.form_submit_button("Save Contact")
+            if submitted and name:
+                if sheet:
+                    ws = sheet.worksheet('Directory')
+                    ws.append_row([name, company, email, phone, address])
+                    st.success("Contact Saved!")
+                else:
+                    st.warning("Saved locally (No DB connection)")
+
+        # Show Data
         if sheet:
             try:
                 ws = sheet.worksheet('Directory')
-                ws.append_row([name, company, email, phone, address])
-                flash('Contact saved to Google Sheet!', 'success')
+                data = ws.get_all_records()
+                if data:
+                    st.dataframe(pd.DataFrame(data))
+                else:
+                    st.info("No contacts found.")
             except Exception as e:
-                flash(f'Error saving to sheet: {str(e)}', 'error')
-        else:
-            flash('Saved locally (No Google Sheet connection). Check console.', 'warning')
-            print(f"Saving Directory: {name}, {company}")
-            
-        return redirect(url_for('directory'))
-    return render_template('directory.html')
+                st.error(f"Error fetching data: {e}")
 
-@app.route('/hours', methods=['GET', 'POST'])
-@login_required
-def hours():
-    if request.method == 'POST':
-        employee = request.form.get('employee')
-        date = request.form.get('date')
-        hours_worked = request.form.get('hours')
-        task = request.form.get('task')
+    # --- Hours Page ---
+    elif page == "Hours":
+        st.title("⏱️ Hour Tracker")
         
-        sheet = get_db_connection()
-        if sheet:
-            try:
-                ws = sheet.worksheet('Hours')
-                ws.append_row([employee, date, hours_worked, task])
-                flash('Hours logged to Google Sheet!', 'success')
-            except Exception as e:
-                flash(f'Error saving to sheet: {str(e)}', 'error')
-        else:
-            flash('Saved locally (No Google Sheet connection). Check console.', 'warning')
-            print(f"Saving Hours: {employee}, {hours_worked}")
+        with st.form("hours_form", clear_on_submit=True):
+            employee = st.text_input("Employee Name")
+            col1, col2 = st.columns(2)
+            work_date = col1.date_input("Date", date.today())
+            hours = col2.number_input("Hours Worked", step=0.5)
+            task = st.text_area("Task / Description")
             
-        return redirect(url_for('hours'))
-    return render_template('hours.html')
+            submitted = st.form_submit_button("Log Hours")
+            if submitted and employee:
+                if sheet:
+                    ws = sheet.worksheet('Hours')
+                    ws.append_row([employee, str(work_date), hours, task])
+                    st.success("Hours Logged!")
 
-@app.route('/expenses', methods=['GET', 'POST'])
-@login_required
-def expenses():
-    if request.method == 'POST':
-        category = request.form.get('category')
-        amount = request.form.get('amount')
-        description = request.form.get('description')
-        date = request.form.get('date')
+    # --- Expenses Page ---
+    elif page == "Expenses":
+        st.title("💳 Expense Tracker")
         
-        sheet = get_db_connection()
-        if sheet:
-            try:
-                ws = sheet.worksheet('Expenses')
-                ws.append_row([category, amount, date, description])
-                flash('Expense logged to Google Sheet!', 'success')
-            except Exception as e:
-                flash(f'Error saving to sheet: {str(e)}', 'error')
-        else:
-            flash('Saved locally (No Google Sheet connection). Check console.', 'warning')
-            print(f"Saving Expense: {category}, {amount}")
+        with st.form("expenses_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            category = col1.selectbox("Category", ["Mileage", "Gas", "Lodging", "Food", "Materials", "Other"])
+            amount = col2.number_input("Amount ($)", step=0.01)
+            expense_date = col1.date_input("Date", date.today())
+            description = st.text_area("Description")
             
-        return redirect(url_for('expenses'))
-    return render_template('expenses.html')
+            submitted = st.form_submit_button("Log Expense")
+            if submitted and amount:
+                if sheet:
+                    ws = sheet.worksheet('Expenses')
+                    ws.append_row([category, amount, str(expense_date), description])
+                    st.success("Expense Logged!")
 
-@app.route('/mileage', methods=['GET', 'POST'])
-@login_required
-def mileage():
-    if request.method == 'POST':
-        date = request.form.get('date')
-        license_plate = request.form.get('license')
-        vehicle = request.form.get('vehicle')
-        vehicle_type = request.form.get('vehicle_type')
-        start_odo = float(request.form.get('start_odo') or 0)
-        end_odo = float(request.form.get('end_odo') or 0)
+    # --- Mileage Page ---
+    elif page == "Mileage":
+        st.title("🚗 Mileage Tracker")
         
-        total_miles = end_odo - start_odo
-        reimbursement = total_miles * 0.65
-        
-        # Format for display/storage
-        reimbursement_str = f"${reimbursement:.2f}"
-        
-        sheet = get_db_connection()
-        if sheet:
-            try:
-                ws = sheet.worksheet('Mileage')
-                ws.append_row([
-                    date, license_plate, vehicle, vehicle_type, 
-                    start_odo, end_odo, total_miles, reimbursement_str
-                ])
-                flash(f'Mileage logged! Reimbursement: {reimbursement_str}', 'success')
-            except Exception as e:
-                flash(f'Error saving to sheet: {str(e)}', 'error')
-        else:
-            flash(f'Saved locally. Reimbursement: {reimbursement_str}', 'warning')
-            print(f"Saving Mileage: {total_miles} miles, {reimbursement_str}")
+        with st.form("mileage_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            mileage_date = col1.date_input("Date", date.today())
+            license_plate = col2.text_input("License Plate")
+            vehicle = col1.text_input("Vehicle")
+            vehicle_type = col2.selectbox("Type", ["Personal", "Company", "Rental"])
             
-        return redirect(url_for('mileage'))
-    return render_template('mileage.html')
-
-if __name__ == '__main__':
-    # Try to initialize the sheet on startup
-    try:
-        init_sheet()
-    except Exception as e:
-        print(f"Initialization skipped: {e}")
-        
-    app.run(debug=True, port=5001)
+            col3, col4 = st.columns(2)
+            start_odo = col3.number_input("Starting Odometer", step=0.1)
+            end_odo = col4.number_input("Ending Odometer", step=0.1)
+            
+            submitted = st.form_submit_button("Calculate & Log")
+            
+            if submitted:
+                total_miles = end_odo - start_odo
+                reimbursement = total_miles * 0.65
+                reimbursement_str = f"${reimbursement:.2f}"
+                
+                st.info(f"Total Miles: {total_miles:.1f} | Reimbursement: {reimbursement_str}")
+                
+                if sheet:
+                    ws = sheet.worksheet('Mileage')
+                    ws.append_row([
+                        str(mileage_date), license_plate, vehicle, vehicle_type, 
+                        start_odo, end_odo, total_miles, reimbursement_str
+                    ])
+                    st.success("Mileage Logged!")
