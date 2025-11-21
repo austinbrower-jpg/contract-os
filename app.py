@@ -9,6 +9,12 @@ from datetime import date
 # --- Page Configuration ---
 st.set_page_config(page_title="ContractOS", page_icon="🔒", layout="wide")
 
+# --- Session State Initialization ---
+if "username" not in st.session_state:
+    st.session_state["username"] = ""
+if "password" not in st.session_state:
+    st.session_state["password"] = ""
+
 # --- Constants ---
 SHEET_ID = '1QsIKLchwTzC0tAhdgT3JE6TFYRqWS-g5ZNyV5HYglCY'
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
