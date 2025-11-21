@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <div style="text-align: center; margin-bottom: 3rem;">
+        <h1>Welcome back, Austin</h1>
+        <p style="color: #94a3b8; font-size: 1.1rem;">Manage your government contract operations efficiently.</p>
+    </div>
+
+    <div class="grid">
+        <a href="{{ url_for('directory') }}" class="dashboard-card">
+            <div class="icon">👥</div>
+            <h3>Directory</h3>
+            <p style="color: #94a3b8; margin-top: 0.5rem; font-size: 0.9rem;">Manage contacts and companies</p>
+        </a>
+        <a href="{{ url_for('hours') }}" class="dashboard-card">
+            <div class="icon">⏱️</div>
+            <h3>Hour Tracker</h3>
+            <p style="color: #94a3b8; margin-top: 0.5rem; font-size: 0.9rem;">Log employee time</p>
+        </a>
+        <a href="{{ url_for('expenses') }}" class="dashboard-card">
+            <div class="icon">💳</div>
+            <h3>Expenses</h3>
+            <p style="color: #94a3b8; margin-top: 0.5rem; font-size: 0.9rem;">Track project costs</p>
+        </a>
+        <a href="{{ url_for('mileage') }}" class="dashboard-card">
+            <div class="icon">🚗</div>
+            <h3>Mileage</h3>
+            <p style="color: #94a3b8; margin-top: 0.5rem; font-size: 0.9rem;">Log vehicle miles</p>
+        </a>
+    </div>
+</div>
+{% endblock %}

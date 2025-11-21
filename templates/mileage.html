@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <h1>Mileage Tracker</h1>
+    <div class="card">
+        <form method="POST">
+            <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                    <label>Date</label>
+                    <input type="date" name="date" required>
+                </div>
+                <div class="form-group">
+                    <label>License Plate</label>
+                    <input type="text" name="license" placeholder="ABC-1234" required>
+                </div>
+            </div>
+
+            <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                    <label>Vehicle</label>
+                    <input type="text" name="vehicle" placeholder="Ford F-150" required>
+                </div>
+                <div class="form-group">
+                    <label>Vehicle Type</label>
+                    <select name="vehicle_type" required>
+                        <option value="" disabled selected>Select type...</option>
+                        <option value="Personal">Personal</option>
+                        <option value="Company">Company</option>
+                        <option value="Rental">Rental</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                    <label>Starting Odometer</label>
+                    <input type="number" name="start_odo" step="0.1" required placeholder="10000">
+                </div>
+                <div class="form-group">
+                    <label>Ending Odometer</label>
+                    <input type="number" name="end_odo" step="0.1" required placeholder="10050">
+                </div>
+            </div>
+
+            <div
+                style="margin-top: 1rem; padding: 1rem; background: rgba(56, 189, 248, 0.1); border-radius: 0.5rem; border: 1px solid rgba(56, 189, 248, 0.3);">
+                <p style="color: #38bdf8; font-size: 0.9rem;">
+                    ℹ️ Reimbursement is automatically calculated at <strong>$0.65/mile</strong>.
+                </p>
+            </div>
+            <br>
+
+            <button type="submit">Log Mileage</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

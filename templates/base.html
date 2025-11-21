@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Contract Manager{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <nav>
+        <a href="{{ url_for('index') }}" class="logo">ContractOS</a>
+        <div class="nav-links">
+            <a href="{{ url_for('directory') }}"
+                class="{% if request.endpoint == 'directory' %}active{% endif %}">Directory</a>
+            <a href="{{ url_for('hours') }}" class="{% if request.endpoint == 'hours' %}active{% endif %}">Hours</a>
+            <a href="{{ url_for('expenses') }}"
+                class="{% if request.endpoint == 'expenses' %}active{% endif %}">Expenses</a>
+            <a href="{{ url_for('mileage') }}"
+                class="{% if request.endpoint == 'mileage' %}active{% endif %}">Mileage</a>
+        </div>
+    </nav>
+
+    <main>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+</body>
+
+</html>

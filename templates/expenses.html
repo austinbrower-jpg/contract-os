@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <h1>Expense Tracker</h1>
+    <div class="card">
+        <form method="POST">
+            <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                    <label>Category</label>
+                    <select name="category" required>
+                        <option value="" disabled selected>Select category...</option>
+                        <option value="Mileage">Mileage</option>
+                        <option value="Gas">Gas</option>
+                        <option value="Lodging">Lodging</option>
+                        <option value="Food">Food</option>
+                        <option value="Materials">Materials</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Amount ($)</label>
+                    <input type="number" name="amount" step="0.01" required placeholder="0.00">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Date</label>
+                <input type="date" name="date" required>
+            </div>
+
+            <div class="form-group">
+                <label>Description / Notes</label>
+                <textarea name="description" rows="3" placeholder="Details about the expense..."></textarea>
+            </div>
+
+            <button type="submit">Log Expense</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
